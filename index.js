@@ -62,11 +62,9 @@ proto.on = function (ev, fn) {
 
 proto.emit = function (ev, a, b, c, d) {
   if (!(ev in this.listeners)) return
-  setTimeout(function () {
-    for (var i=0, len=this.listeners[ev].length; i<len; i++) {
-      this.listeners[ev][i].call(this, a, b, c, d)
-    }
-  }.bind(this), 0)
+  for (var i=0, len=this.listeners[ev].length; i<len; i++) {
+    this.listeners[ev][i].call(this, a, b, c, d)
+  }
   return this
 }
 

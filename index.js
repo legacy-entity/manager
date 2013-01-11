@@ -8,7 +8,7 @@ var slice = [].slice
 var Entity = require('entity')
 
 /**
- * Export Manager.
+ * Manager factory.
  */
 
 module.exports = function (parent) {
@@ -31,16 +31,34 @@ function Manager (parent) {
 
   this.listeners = {}
 
-  this._state = 'none'
+  this.state('ready')
 }
 
 var proto = Manager.prototype
+
+/**
+ * Listen on events.
+ *
+ * @param {string} ev 
+ * @param {fn} fn 
+ * @return {object} this
+ * @api public
+ */
 
 proto.on = function (ev, fn) {
   this.listeners[ev] = this.listeners[ev] || []
   this.listeners[ev].push(fn)
   return this
 }
+
+/**
+ * Emit events.
+ *
+ * @param {string} ev 
+ * @param {mixed} arguments
+ * @return {object} this
+ * @api public
+ */
 
 proto.emit = function (ev, a, b, c, d) {
   if (!(ev in this.listeners)) return
@@ -52,9 +70,24 @@ proto.emit = function (ev, a, b, c, d) {
   return this
 }
 
+/**
+ * Determine whether this is the root manager.
+ *
+ * @return {boolean}
+ * @api public
+ */
+
 proto.isRoot = function () {
   return this.parent === this
 }
+
+/**
+ * Attach listeners for the methods of an object.
+ *
+ * @param {object} obj
+ * @return {object} this
+ * @api private
+ */
 
 proto.addListeners = function (obj) {
   Object.keys(obj)
@@ -74,10 +107,14 @@ proto.addListeners = function (obj) {
         })
       }
     }, this)
+  return this
 }
 
 /**
  * Apply component data to an entity or all.
+ *
+ * @param {entity} [e]
+ * @api public
  */
 
 proto.applyComponents = function (e) {
@@ -93,10 +130,28 @@ proto.applyComponents = function (e) {
   return this
 }
 
+/**
+ * Generate a string serialized snapshot of our entities.
+ *
+ * @return {string}
+ * @api public
+ */
+
 proto.snapshot = function () {
   return JSON.stringify(this.entities)
 }
 
+/**
+ * Main event handlers.
+ *
+ * @api public
+ */
+
+proto.init = function () { return this.state('init') }
+proto.start = function () { return this.state('start') }
+proto.pause = function () { return this.state('pause') }
+proto.stop = function () { return this.state('stop') }
+proto.tear = function () { return this.state('tear') }
 proto.reset = function () {
   this.stop()
   this.tear()
@@ -107,11 +162,13 @@ proto.reset = function () {
   return this
 }
 
-proto.init = function () { return this.state('init') }
-proto.start = function () { return this.state('start') }
-proto.pause = function () { return this.state('pause') }
-proto.stop = function () { return this.state('stop') }
-proto.tear = function () { return this.state('tear') }
+/**
+ * State accessor. Also emits state on change.
+ *
+ * @param {string} [s]
+ * @return {string} s
+ * @api private
+ */
 
 proto.state = function (s) {
   if (null == s) return this._state
@@ -119,6 +176,14 @@ proto.state = function (s) {
   this.emit(s)
   return this
 }
+
+/**
+ * Get all entities using all the components in the array.
+ *
+ * @param {array} arr
+ * @return {array} entities
+ * @api public
+ */
 
 proto.of = function (arr) {
   var res = []
@@ -150,7 +215,18 @@ proto.of = function (arr) {
   return res
 }
 
-proto.each = function (c) {
+/**
+ * Iterate entities of certain components,
+ * or through all if no component is passed.
+ *
+ * @param {component} c
+ * ...
+ * @param {fn} fn
+ * @return {object} this
+ * @api public
+ */
+
+proto.each = function (c, fn) {
   var args
   if ('function' == typeof c) {
     this.entities.forEach(c, this)
@@ -162,14 +238,38 @@ proto.each = function (c) {
   else {
     args = slice.call(arguments)
   }
-  var fn = args.pop()
+  fn = args.pop()
   this.of(args).forEach(fn)
   return this
 }
 
+/**
+ * Get the first entity matching component.
+ *
+ * @param {component} c 
+ * @return {entity}
+ * @api public
+ */
+
 proto.get = function (c) {
   return this.of(c)[0]
 }
+
+/**
+ * Use an entity, system or manager.
+ * 
+ * Registers an entity (creating a new one or reusing
+ * the one passed).
+ * 
+ * Registers a system to be used. Order added matters.
+ *
+ * Adds a manager to our children.
+ *
+ * @param {manager|system|entity} item
+ * @param {boolean} reuse
+ * @return {object} this
+ * @api public
+ */
 
 proto.use = function (item, reuse) {
   if (item instanceof Entity) {
@@ -204,16 +304,34 @@ proto.use = function (item, reuse) {
       this.children.push(item)
     }
   }
-  else console.log('unknown', item)
+  else console.error('unknown', item)
   return this
 }
+
+/**
+ * Register the components of an entity.
+ *
+ * @param {entity} e 
+ * @return {object} this
+ * @api private
+ */
 
 proto.registerComponents = function (e) {
   var self = this
   e.components.forEach(function (c) {
     self.reg(c, e)
   })
+  return this
 }
+
+/**
+ * Register a component for an entity.
+ *
+ * @param {component} c 
+ * @param {entity} e 
+ * @return {object} this
+ * @api private
+ */
 
 proto.reg = function (c, e) {
   var comps = this.components
@@ -228,7 +346,18 @@ proto.reg = function (c, e) {
     index.push(c)
     comps[index.length-1] = [e]
   }
+  return this
 }
+
+/**
+ * Join (late) an entity.
+ * It will try to apply components and systems
+ * based on the current state.
+ *
+ * @param {entity} e 
+ * @return {object} this
+ * @api public
+ */
 
 proto.join = function (e) {
   this.applyComponents(e)
@@ -246,6 +375,14 @@ proto.join = function (e) {
   return this
 }
 
+/**
+ * Create an entity of components, and use it.
+ *
+ * @param {component} c, [c, [...]]
+ * @return {entity} entity
+ * @api public
+ */
+
 proto.createEntity = function () {
   var args = slice.call(arguments)
   var e = args[0]
@@ -259,12 +396,28 @@ proto.createEntity = function () {
   return e
 }
 
+/**
+ * Remove all entities.
+ *
+ * @return {object} this
+ * @api public
+ */
+
 proto.removeAllEntities = function () {
   this.entities.slice().forEach(function (e) {
     this.root.removeEntity(e)
     this.removeEntity(e)
   }, this)
+  return this
 }
+
+/**
+ * Remove an entity.
+ *
+ * @param {entity} e
+ * @return {object) this
+ * @api public
+ */
 
 proto.removeEntity = function (e) {
   var self = this
@@ -280,13 +433,30 @@ proto.removeEntity = function (e) {
       if (~idx) comps.splice(idx, 1)
     }
   })
+
+  return this
 }
+
+/**
+ * Create a manager and use it.
+ *
+ * @return {manager}
+ * @api public
+ */
 
 proto.createManager = function () {
   var manager = new Manager(this)
   this.use(manager)
   return manager
 }
+
+/**
+ * Mixin helper.
+ *
+ * @param {object} target
+ * @param {object} source
+ * @param {boolean} force
+ */
 
 function mixin (t, s, f) {
   for (var k in s) {

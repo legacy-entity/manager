@@ -288,9 +288,11 @@ proto.use = function (item, reuse) {
       }
     }
   }
-  else if ('object' == typeof item) {
+  else if ('object' == typeof item || 'function' == typeof item) {
     item = item.system || item
+
     this.addListeners(item)
+
     if (!('children' in item)) {
       item.emit = this.emit.bind(this)
       item.each = this.each.bind(this)

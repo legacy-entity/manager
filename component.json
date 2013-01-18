@@ -1,8 +1,8 @@
 {
   "name": "manager",
   "description": "entity component systems manager",
-  "version": "0.0.1",
-  "keywords": ["game", "manager", "entity", "component", "system"],
+  "version": "0.0.2",
+  "keywords": ["game","manager","entity","component","system"],
   "dependencies": {
     "component/emitter": "*",
     "entity/entity": "*"

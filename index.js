@@ -276,7 +276,7 @@ proto.use = function (item, reuse) {
     if (!reuse) e = new Entity(item)
     if (!~this.entities.indexOf(e)) {
       var self = this
-      e.on('use', function (c) {
+      e.on('add', function (c) {
         self.reg(c, e)
       })
       this.entities.push(e)

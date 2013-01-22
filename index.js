@@ -361,18 +361,34 @@ proto.reg = function (c, e) {
  */
 
 proto.join = function (e) {
+  this.use(e, true)
   this.applyComponents(e)
   var s = this.state()
   if ('none' == s) return this
   if ('init' == s || 'start' == s || 'pause' == s || 'stop' == s) {
-    e.init(this.systems)
+    this.runSystems(e, 'init')
   }
   if ('start' == s || 'pause' == s) {
-    e.start(this.systems)
+    this.runSystems(e, 'start')
   }
   if ('pause' == s) {
-    e.pause(this.systems)
+    this.runSystems(e, 'pause')
   }
+  return this
+}
+
+proto.runSystems = function (e, method) {
+  this.systems.forEach(function (system) {
+    if (!system[method]) return
+    if (!system[method].length) {
+      return
+    }
+    system.each(system, function (_e) {
+      if (e === _e) {
+        system[method].call(system, e)
+      }
+    })
+  })
   return this
 }
 

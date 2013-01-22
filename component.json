@@ -7,6 +7,10 @@
     "component/emitter": "*",
     "entity/entity": "*"
   },
+  "development": {
+    "component/assert": "*",
+    "entity/entity": "*"
+  },
   "author": "stagas",
   "licence": "MIT",
   "scripts": ["index.js"]

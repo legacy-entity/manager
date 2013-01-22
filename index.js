@@ -402,13 +402,7 @@ proto.runSystems = function (e, method) {
 
 proto.createEntity = function () {
   var args = slice.call(arguments)
-  var e = args[0]
-  if (!(e instanceof Entity)) {
-    e = new Entity()
-    args.forEach(function (arg) {
-      e.use(arg)
-    })
-  }
+  var e = new Entity(args)
   this.use(e, true)
   return e
 }

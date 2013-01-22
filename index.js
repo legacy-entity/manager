@@ -11,17 +11,17 @@ var Entity = require('entity')
  * Manager factory.
  */
 
-module.exports = function (parent) {
-  return new Manager(parent)
-}
+module.exports = Manager
 
 /**
  * Manager class.
  */
 
 function Manager (parent) {
-  this.parent = parent
-  this.root = this.parent || this
+  if (!(this instanceof Manager)) return new Manager(parent)
+
+  this.parent = parent || this
+  this.root = this.parent.root || this
   this.children = []
 
   this.systems = []

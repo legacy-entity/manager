@@ -172,6 +172,7 @@ proto.state = function (s) {
   if (null == s) return this._state
   this._state = s
   this.emit(s)
+  this.emit('state', s)
   return this
 }
 

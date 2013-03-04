@@ -1,15 +1,17 @@
 {
   "name": "manager",
   "description": "entity component systems manager",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "keywords": ["game","manager","entity","component","system"],
   "dependencies": {
-    "component/emitter": "*",
-    "entity/entity": "*"
+    "entity/entity": "*",
+    "component/set": "*",
+    "component/emitter": "*"
   },
   "development": {
-    "component/assert": "*",
-    "entity/entity": "*"
+    "stagas/watch-js": "*",
+    "entity/entity": "*",
+    "component/assert": "*"
   },
   "author": "stagas",
   "license": "MIT",

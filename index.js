@@ -1,5 +1,17 @@
 
-// slice
+/*!
+ *
+ * Manager for Entity/Component/Systems
+ *
+ * http://github.com/entity
+ *
+ * MIT
+ *
+ */
+
+/**
+ * Reference to slice.
+ */
 
 var slice = [].slice
 
@@ -7,10 +19,12 @@ var slice = [].slice
  * Module dependencies.
  */
 
+var Emitter = require('emitter')
 var Entity = require('entity')
+var Set = require('set')
 
 /**
- * Manager factory.
+ * Exports.
  */
 
 module.exports = Manager
@@ -20,72 +34,102 @@ module.exports = Manager
  */
 
 function Manager (parent) {
-  if (!(this instanceof Manager)) return new Manager(parent)
-
   this.parent = parent || this
   this.root = this.parent.root || this
-  this.children = []
 
-  this.systems = []
-  this.entities = []
-  this.components = {}
-  this.componentsIndex = []
+  this.children = new Set()
 
-  this.listeners = {}
+  this.systems = new Set()
+  this.entities = new Set()
+  this.components = new Set()
 
+  this.bindEvents()
   this.state('ready')
+}
+
+/**
+ * Make Emitter.
+ */
+
+Emitter(Manager.prototype)
+
+/**
+ * Determine whether this is the root manager.
+ *
+ * @return {Boolean}
+ * @api public
+ */
+
+Manager.prototype.isRoot = function () {
+  return this.root === this
+}
+
+/**
+ * Bind behavior on certain events.
+ *
+ * @return {Manager} this
+ * @api private
+ */
+
+Manager.prototype.bindEvents = function () {
+  var self = this
+
+  // lazily apply components on init
+
+  this.on('init', function () {
+    if (!this.hasAppliedComponents) {
+      this.applyComponents()
+    }
+  })
+
+  // return to ready
+  // after tear fires
+
+  this.on('tear', function () {
+    setTimeout(function () {
+      self.state('ready')
+    }, 0)
+  })
+
+  return this
 }
 
 /**
  * Create an entity of components, and use it.
  *
- * @param {component} c...
- * @return {entity} entity
+ * @param {Object} c...
+ * @return {Entity} entity
  * @api public
  */
 
 Manager.prototype.createEntity = function () {
-  var args = slice.call(arguments)
-  var e = new Entity(args)
-  this.use(e, true)
+  var comps = slice.call(arguments)
+  var e = new Entity()
+  comps.forEach(function (c) {
+    e.add(c)
+  })
+  this.use(e)
   return e
-}
-
-/**
- * Remove all entities.
- *
- * @return {object} this
- * @api public
- */
-
-Manager.prototype.removeAllEntities = function () {
-  this.entities.slice().forEach(function (e) {
-    this.root.removeEntity(e)
-    this.removeEntity(e)
-  }, this)
-  return this
 }
 
 /**
  * Remove an entity.
  *
- * @param {entity} e
- * @return {object) this
+ * @param {Entity} e
+ * @return {Manager} this
  * @api public
  */
 
 Manager.prototype.removeEntity = function (e) {
   var self = this
-  
-  var idx = this.entities.indexOf(e)
-  if (~idx) this.entities.splice(idx, 1)
-  
-  e.components.forEach(function (c) {
-    var idx = self.componentsIndex.indexOf(c)
-    var comps = self.components[idx]
-    if (null != comps) {
-      var idx = comps.indexOf(e)
-      if (~idx) comps.splice(idx, 1)
+  this.entities.remove(e)
+  e.components.each(function (c) {
+    c.entities.remove(e)
+
+    // remove component when
+    // it has no entities
+    if (!c.entities.size()) {
+      self.components.remove(c)
     }
   })
 
@@ -93,9 +137,77 @@ Manager.prototype.removeEntity = function (e) {
 }
 
 /**
- * Create a manager and use it.
+ * Remove all entities.
  *
- * @return {manager}
+ * @return {Manager} this
+ * @api public
+ */
+
+Manager.prototype.removeAllEntities = function () {
+  var self = this
+  this.entities.values().slice().forEach(function (e) {
+    self.removeEntity(e)
+  })
+  return this
+}
+
+/**
+ * Register all the components of an entity.
+ *
+ * @param {Entity} e
+ * @return {Manager} this
+ * @api private
+ */
+
+Manager.prototype.registerComponents = function (e) {
+  var self = this
+  e.components.each(function (c) {
+    self.registerComponent(c, e)
+  })
+  return this
+}
+
+/**
+ * Register a component with an entity.
+ *
+ * @param {Object} c
+ * @param {Entity} e
+ * @return {Object} this
+ * @api private
+ */
+
+Manager.prototype.registerComponent = function (c, e) {
+  c.entities = c.entities || new Set()
+  c.entities.add(e)
+  this.components.add(c)
+  return this
+}
+
+/**
+ * Apply component data to an entity or all.
+ *
+ * @param {Entity} [e]
+ * @api public
+ */
+
+Manager.prototype.applyComponents = function (e) {
+  if (e) {
+    e.applyComponents()
+    return this
+  }
+  else {
+    this.entities.each(function (e) {
+      e.applyComponents()
+    })
+    this.hasAppliedComponents = true
+  }
+  return this
+}
+
+/**
+ * Create a child manager and use it.
+ *
+ * @return {Manager} new_manager
  * @api public
  */
 
@@ -106,129 +218,165 @@ Manager.prototype.createManager = function () {
 }
 
 /**
- * Register the components of an entity.
+ * Attach listeners for the methods of an object.
  *
- * @param {entity} e 
- * @return {object} this
+ * @param {Object} obj
+ * @return {Manager} this
  * @api private
  */
 
-Manager.prototype.registerComponents = function (e) {
+Manager.prototype.addListeners = function (obj) {
   var self = this
-  e.components.forEach(function (c) {
-    self.reg(c, e)
+
+  Object.keys(obj)
+  .filter(function (key) { // don't add private methods
+    return '_' != key.substr(0,1)
+  })
+  .forEach(function (key) {
+    var val = obj[key]
+    if ('function' == typeof val) {
+      var fn = val
+      self.on(key, function () {
+        var args = slice.call(arguments)
+
+        if (!fn.length) {
+          return fn.call(obj)
+        }
+
+        self.each(obj, function (e) {
+          fn.apply(obj, [e].concat(args))
+        })
+      })
+    }
+  })
+
+  return this
+}
+
+/**
+ * Get all entities using all
+ * the components in the array.
+ *
+ * @param {Array} arr
+ * @return {Set} entities
+ * @api public
+ */
+
+Manager.prototype.of = function (arr) {
+  var self = this
+  if (!arr.length) return new Set()
+  if (1===arr.length && arr[0].entities) {
+    return new Set(arr[0].entities.values())
+  }
+  var entities = arr.reduce(function (p, n) {
+    return p.intersect(n.entities || new Set())
+  }, this.entities)
+  return entities
+}
+
+/**
+ * Iterate entities of certain components,
+ * or through all if no component is passed.
+ *
+ * @param {Object} [c...]
+ * @param {Function} fn
+ * @return {Object} this
+ * @api public
+ */
+
+Manager.prototype.each = function (c, fn) {
+  var args
+  if ('function' == typeof c) {
+    this.entities.each(c)
+    return this
+  }
+  else if (Array.isArray(c)) {
+    args = c
+  }
+  else {
+    args = slice.call(arguments)
+  }
+  fn = args.pop()
+  this.of(args).each(fn)
+  return this
+}
+
+/**
+ * Get the first entity matching component.
+ *
+ * @param {Component} c
+ * @return {Entity}
+ * @api public
+ */
+
+Manager.prototype.get = function (c) {
+  return this.of([c]).values()[0]
+}
+
+/**
+ * Use a entity, system or manager.
+ *
+ * When entity:
+ * - Registers an entity (creating a
+ *   new one or reusing the one passed).
+ *
+ * When system:
+ * - Registers a system to be used.
+ *   Order matters.
+ *
+ * When manager:
+ * - Adds the manager to its children.
+ *
+ * @param {Entity|Mixed|Manager} item
+ * @param {Boolean} reuse
+ * @return {Manager} this
+ * @api public
+ */
+
+Manager.prototype.use = function (item, reuse) {
+  if (item instanceof Manager) {
+    this.children.add(item)
+  }
+  else if (item instanceof Entity) {
+    var e = item
+    e.on('add', function (c) {
+      self.registerComponent(c, e)
+    })
+    this.entities.add(e)
+    this.registerComponents(e)
+  }
+  else {
+    this.addListeners(item)
+    this.systems.add(item)
+  }
+  return this
+}
+
+/**
+ * Run the systems for an entity alone.
+ *
+ * @param {Entity} e
+ * @param {String} method
+ * @return {Manager} this
+ * @api private
+ */
+
+Manager.prototype.runSystems = function (e, method) {
+  e.components.each(function (c) {
+    if (method in c) c[method].call(c, e)
   })
   return this
 }
 
 /**
- * Apply component data to an entity or all.
+ * Game state switches.
  *
- * @param {entity} [e]
- * @api public
- */
-
-Manager.prototype.applyComponents = function (e) {
-  if (e) {
-    e.components.forEach(function (c) {
-      e.applyComponent(c)
-    })
-    return this
-  }
-  else {
-    this.each(this.applyComponents.bind(this))
-  }
-  return this
-}
-
-/**
- * Listen on events.
+ * States:
  *
- * @param {string} ev 
- * @param {fn} fn 
- * @return {object} this
- * @api public
- */
-
-Manager.prototype.on = function (ev, fn) {
-  this.listeners[ev] = this.listeners[ev] || []
-  this.listeners[ev].push(fn)
-  return this
-}
-
-/**
- * Emit events.
+ *   init -> ( start - pause - stop ) -> tear
+ *           (---------loop---------)
  *
- * @param {string} ev 
- * @param {mixed} arguments
- * @return {object} this
- * @api private
- */
-
-Manager.prototype.emit = function (ev, a, b, c, d) {
-  if (!(ev in this.listeners)) return
-  for (var i=0, len=this.listeners[ev].length; i<len; i++) {
-    this.listeners[ev][i].call(this, a, b, c, d)
-  }
-  return this
-}
-
-/**
- * Determine whether this is the root manager.
- *
- * @return {boolean}
- * @api public
- */
-
-Manager.prototype.isRoot = function () {
-  return this.parent === this
-}
-
-/**
- * Attach listeners for the methods of an object.
- *
- * @param {object} obj
- * @return {object} this
- * @api private
- */
-
-Manager.prototype.addListeners = function (obj) {
-  Object.keys(obj)
-    .filter(function (k) { return '_' != k.substr(0,1) })
-    .forEach(function (k) {
-      if ('function' == typeof obj[k]) {
-        this.on(k, function () {
-          var args = slice.call(arguments)
-
-          if (!obj[k].length) {
-            return obj[k].call(obj)
-          }
-
-          this.each(obj, function (e) {
-            obj[k].apply(obj, [e].concat(args))
-          })
-        })
-      }
-    }, this)
-  return this
-}
-
-/**
- * Generate a string serialized snapshot of our entities.
- *
- * @return {string}
- * @api public
- */
-
-Manager.prototype.snapshot = function () {
-  return JSON.stringify(this.entities)
-}
-
-/**
- * Main event handlers.
- * 
- * init, start, pause, stop, tear
- *
+ * @return {Manager} this
  * @api public
  */
 
@@ -237,21 +385,33 @@ Manager.prototype.start = function () { return this.state('start') }
 Manager.prototype.pause = function () { return this.state('pause') }
 Manager.prototype.stop = function () { return this.state('stop') }
 Manager.prototype.tear = function () { return this.state('tear') }
+
+/**
+ * Reset state.
+ *
+ * Executes:
+ *
+ *   stop -> tear -> init -> start
+ *
+ * @return {Manager} this
+ * @api public
+ */
+
 Manager.prototype.reset = function () {
   this.stop()
   this.tear()
-  setTimeout(function () {
+  this.once('ready', function () {
     this.init()
     this.start()
-  }.bind(this), 0)
+  })
   return this
 }
 
 /**
  * State accessor. Also emits state on change.
  *
- * @param {string} [s]
- * @return {string} s
+ * @param {String} [s]
+ * @return {Mixed}
  * @api private
  */
 
@@ -264,178 +424,18 @@ Manager.prototype.state = function (s) {
 }
 
 /**
- * Get all entities using all the components in the array.
- *
- * @param {array} arr
- * @return {array} entities
- * @api public
- */
-
-Manager.prototype.of = function (arr) {
-  var res = []
-  var ents = []
-  for (var i=0, c, len=arr.length; i<len; i++) {
-    c = arr[i]
-    if ('string' == typeof c) {
-      ents.push(this.entities.filter(function (e) {
-        return (c in e)
-      }))
-    }
-    else {
-      c = c.component || c
-      var index = this.componentsIndex
-      var idx = index.indexOf(c)
-      if (~idx) ents.push(this.components[idx] || [])
-    }
-  }
-  var exclude
-  if (!ents.length) return res
-  for (var i=0, e, len=ents[0].length; i<len; i++) {
-    e = ents[0][i]
-    exclude = false
-    ents.forEach(function (list) {
-      if (!~list.indexOf(e)) exclude = true
-    })
-    if (!exclude) res.push(e)
-  }
-  return res
-}
-
-/**
- * Iterate entities of certain components,
- * or through all if no component is passed.
- *
- * @param {component} [c...]
- * @param {fn} fn
- * @return {object} this
- * @api public
- */
-
-Manager.prototype.each = function (c, fn) {
-  var args
-  if ('function' == typeof c) {
-    this.entities.forEach(c, this)
-    return this
-  }
-  else if (Array.isArray(c)) {
-    args = c
-  }
-  else {
-    args = slice.call(arguments)
-  }
-  fn = args.pop()
-  this.of(args).forEach(fn)
-  return this
-}
-
-/**
- * Get the first entity matching component.
- *
- * @param {component} c 
- * @return {entity}
- * @api public
- */
-
-Manager.prototype.get = function (c) {
-  return this.of(c)[0]
-}
-
-/**
- * Use an entity, system or manager.
- *
- * When entity:
- *   Registers an entity (creating a new one or reusing
- *   the one passed).
- *
- * When system:
- *   Registers a system to be used. Order matters.
- *
- * When manager:
- *   Adds the manager to its children.
- *
- * @param {manager|system|entity} item
- * @param {boolean} reuse
- * @return {object} this
- * @api public
- */
-
-Manager.prototype.use = function (item, reuse) {
-  if (item instanceof Entity) {
-    var e = item
-    if (!reuse) e = new Entity(item)
-    if (!~this.entities.indexOf(e)) {
-      var self = this
-      e.on('add', function (c) {
-        self.reg(c, e)
-      })
-      this.entities.push(e)
-      this.registerComponents(e)
-      if (this.root != this) {
-        if (!~this.root.entities.indexOf(e)) {
-          this.root.entities.push(e)
-          this.root.registerComponents(e)
-        }
-      }
-    }
-  }
-  else if ('object' == typeof item || 'function' == typeof item) {
-    item = item.system || item
-
-    this.addListeners(item)
-
-    if (!('children' in item)) {
-      item.emit = this.emit.bind(this)
-      item.each = this.each.bind(this)
-      item.of = this.of.bind(this)
-      this.systems.push(item)
-    }
-    else {
-      item.root = this.root
-      this.children.push(item)
-    }
-  }
-  else console.error('unknown', item)
-  return this
-}
-
-/**
- * Register a component for an entity.
- *
- * @param {component} c 
- * @param {entity} e 
- * @return {object} this
- * @api private
- */
-
-Manager.prototype.reg = function (c, e) {
-  var comps = this.components
-  var index = this.componentsIndex
-  var idx = index.indexOf(c)
-  if (~idx) {
-    if (!~comps[idx].indexOf(e)) {
-      comps[idx].push(e)
-    }
-  }
-  else {
-    index.push(c)
-    comps[index.length-1] = [e]
-  }
-  return this
-}
-
-/**
  * Join (late) an entity.
- * 
+ *
  * It will try to apply components and systems
  * based on the current state.
  *
- * @param {entity} e 
- * @return {object} this
+ * @param {Entity} e
+ * @return {Manager} this
  * @api public
  */
 
 Manager.prototype.join = function (e) {
-  this.use(e, true)
+  this.use(e)
   this.applyComponents(e)
   var s = this.state()
   if ('none' == s) return this
@@ -452,40 +452,18 @@ Manager.prototype.join = function (e) {
 }
 
 /**
- * Run the systems for an entity alone.
+ * Generate an array snapshot of all entities
+ * property values.
  *
- * @param {entity} e 
- * @param {string} method 
- * @return {object} this
- * @api private
+ * @return {Array}
+ * @api public
  */
 
-Manager.prototype.runSystems = function (e, method) {
-  this.systems.forEach(function (system) {
-    if (!system[method]) return
-    if (!system[method].length) {
-      return
-    }
-    system.each(system, function (_e) {
-      if (e === _e) {
-        system[method].call(system, e)
-      }
-    })
+Manager.prototype.snapshot = function () {
+  var snap = this.entities
+  .values()
+  .map(function (e) {
+    return e._properties
   })
-  return this
-}
-
-/**
- * Mixin helper.
- *
- * @param {object} target
- * @param {object} source
- * @param {boolean} force
- * @api private
- */
-
-function mixin (t, s, f) {
-  for (var k in s) {
-    if (f || !(k in t)) t[k] = s[k]
-  }
+  return snap
 }
